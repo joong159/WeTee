@@ -10,6 +10,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import ChatRoomScreen from '../screens/ChatRoomScreen';
 import ManageRoomScreen from '../screens/ManageRoomScreen';
 import KakaoMapScreen from '../screens/KakaoMapScreen';
+import PlaceSearchScreen from '../screens/PlaceSearchScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -111,6 +112,11 @@ export default function AppNavigator({ currentUser, onLogout }) {
         name="KakaoMap"
         component={KakaoMapScreen}
         options={{ headerShown: true, title: '경로 보기', headerBackTitle: '뒤로' }}
+      />
+      <Stack.Screen
+        name="PlaceSearch"
+        component={PlaceSearchScreen}
+        options={{ headerShown: false, animation: 'slide_from_right' }}
       />
     </Stack.Navigator>
   );

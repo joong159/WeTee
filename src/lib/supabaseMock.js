@@ -91,7 +91,16 @@ export const supabaseMock = {
     },
     createRoom: async (roomData, userId) => {
       const rooms = await getItem('mock_rooms', []);
-      const newRoom = { id: 'room-' + Math.random().toString(36).substr(2, 9), created_by: userId, ...roomData, status: 'recruiting', total_fare: 0, estimated_fare: roomData.estimated_fare || 0, created_at: new Date().toISOString() };
+      const newRoom = {
+        id: 'room-' + Math.random().toString(36).substr(2, 9),
+        created_by: userId,
+        ...roomData,
+        status: 'recruiting',
+        total_fare: 0,
+        estimated_fare: roomData.estimated_fare || 0,
+        kakaopay_link: roomData.kakaopay_link || '',
+        created_at: new Date().toISOString(),
+      };
       rooms.push(newRoom);
       await setItem('mock_rooms', rooms);
       return { data: newRoom, error: null };

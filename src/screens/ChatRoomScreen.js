@@ -103,14 +103,11 @@ export default function ChatRoomScreen({ route, navigation }) {
     });
   };
 
-  const handleToss = () => {
-    const perPerson = room.participant_count > 0 && room.total_fare > 0
-      ? Math.ceil(room.total_fare / room.participant_count) : 0;
-    const account = room.bank_account || '';
-    const parts = account.split(' ');
-    const url = `supertoss://send?amount=${perPerson}&bank=${encodeURIComponent(parts[0] || '')}&accountNumber=${parts[1] || ''}&origin=qr&recipient=${encodeURIComponent(parts[2] || '')}&memo=${encodeURIComponent('위티 택시비')}`;
-    Linking.openURL(url).catch(() => {
-      Linking.openURL('https://toss.im').catch(() => Alert.alert('오류', '토스 앱을 열 수 없습니다.'));
+  const handleKakaoPay = () => {
+    const link = room.kakaopay_link || '';
+    if (!link) return Alert.alert('카카오페이 링크 없음', '호스트가 카카오페이 링크를 등록하지 않았어요.');
+    Linking.openURL(link).catch(() => {
+      Alert.alert('오류', '카카오페이 앱을 열 수 없습니다.\n카카오페이 앱이 설치되어 있는지 확인해주세요.');
     });
   };
 
@@ -165,6 +162,14 @@ export default function ChatRoomScreen({ route, navigation }) {
               <TouchableOpacity style={styles.kakaoMapBtn} onPress={handleKakaoMap}>
                 <Text style={styles.kakaoMapBtnText}>카카오맵으로 경로 보기</Text>
               </TouchableOpacity>
+              {room.kakaopay_link ? (
+                <TouchableOpacity style={styles.kakaoPayBtn} onPress={handleKakaoPay}>
+                  <Text style={styles.kakaoPayBtnText}>
+                    카카오페이로 정산
+                    {estimatedPerPerson > 0 ? '  ' + estimatedPerPerson.toLocaleString() + '원' : ''}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
         </TouchableOpacity>
@@ -229,15 +234,19 @@ export default function ChatRoomScreen({ route, navigation }) {
               {actualPerPerson > 0 && (
                 <InfoRow label="실제 1인 부담" value={`${actualPerPerson.toLocaleString()}원`} />
               )}
-              {room.bank_account && <InfoRow label="계좌" value={room.bank_account} />}
               <TouchableOpacity style={styles.kakaoMapBtn} onPress={handleKakaoMap}>
                 <Text style={styles.kakaoMapBtnText}>카카오맵으로 경로 보기</Text>
               </TouchableOpacity>
-              {room.status === 'settlement' && actualPerPerson > 0 && (
-                <TouchableOpacity style={styles.tossBtn} onPress={handleToss}>
-                  <Text style={styles.tossBtnText}>토스로 {actualPerPerson.toLocaleString()}원 보내기</Text>
+              {room.kakaopay_link ? (
+                <TouchableOpacity style={styles.kakaoPayBtn} onPress={handleKakaoPay}>
+                  <Text style={styles.kakaoPayBtnText}>
+                    카카오페이로 정산
+                    {(actualPerPerson > 0 || estimatedPerPerson > 0)
+                      ? '  ' + (actualPerPerson || estimatedPerPerson).toLocaleString() + '원'
+                      : ''}
+                  </Text>
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
           )}
         </TouchableOpacity>
@@ -312,11 +321,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10, alignItems: 'center',
   },
   kakaoMapBtnText: { color: '#111827', fontSize: 14, fontWeight: '700' },
-  tossBtn: {
-    marginTop: 6, backgroundColor: '#0064FF', borderRadius: 10,
-    paddingVertical: 10, alignItems: 'center',
+  kakaoPayBtn: {
+    marginTop: 6, backgroundColor: '#FEE500', borderRadius: 10,
+    paddingVertical: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center',
   },
-  tossBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  kakaoPayBtnText: { color: '#3C1E1E', fontSize: 14, fontWeight: '700' },
   partnerListHeader: {
     backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: '#EAEAEA',

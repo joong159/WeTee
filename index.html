@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WeTee - 대학생 택시 동승 앱</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #F9FAFB;
+      color: #111827;
+    }
+    header {
+      background: #2563EB;
+      color: #fff;
+      padding: 80px 24px 64px;
+      text-align: center;
+    }
+    header .logo { font-size: 48px; margin-bottom: 16px; }
+    header h1 { font-size: 36px; font-weight: 800; margin-bottom: 10px; }
+    header p { font-size: 18px; opacity: 0.85; max-width: 480px; margin: 0 auto; }
+    .badge {
+      display: inline-block;
+      margin-top: 24px;
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.4);
+      border-radius: 999px;
+      padding: 6px 18px;
+      font-size: 14px;
+    }
+    section {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 64px 24px;
+    }
+    h2 { font-size: 24px; font-weight: 700; margin-bottom: 32px; color: #1E40AF; }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      border: 1px solid #E5E7EB;
+    }
+    .card .icon { font-size: 32px; margin-bottom: 12px; }
+    .card h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .card p { font-size: 14px; color: #6B7280; line-height: 1.6; }
+    .divider { border: none; border-top: 1px solid #E5E7EB; margin: 0; }
+    footer {
+      text-align: center;
+      padding: 32px 24px;
+      font-size: 13px;
+      color: #9CA3AF;
+    }
+    footer a { color: #2563EB; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">🚕</div>
+    <h1>WeTee</h1>
+    <p>대학생을 위한 스마트 택시 동승 플랫폼</p>
+    <span class="badge">현재 개발 중 · Coming Soon</span>
+  </header>
+
+  <section>
+    <h2>주요 기능</h2>
+    <div class="features">
+      <div class="card">
+        <div class="icon">🗺️</div>
+        <h3>경로 기반 방 개설</h3>
+        <p>출발지와 목적지를 설정하고 동승 방을 만들어 함께 이동해요.</p>
+      </div>
+      <div class="card">
+        <div class="icon">💰</div>
+        <h3>예상 요금 자동 계산</h3>
+        <p>카카오 내비 API 기반으로 택시 요금을 미리 계산해 인원수로 나눠요.</p>
+      </div>
+      <div class="card">
+        <div class="icon">💬</div>
+        <h3>실시간 채팅</h3>
+        <p>방 참여자들과 실시간으로 대화하며 탑승 일정을 조율해요.</p>
+      </div>
+      <div class="card">
+        <div class="icon">💛</div>
+        <h3>카카오페이 정산</h3>
+        <p>택시 요금을 카카오페이 링크로 간편하게 정산해요.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🎓</div>
+        <h3>대학생 전용</h3>
+        <p>대학교 이메일로 가입해 같은 학교 학생들과 안전하게 동승해요.</p>
+      </div>
+      <div class="card">
+        <div class="icon">⭐</div>
+        <h3>동승자 평가</h3>
+        <p>탑승 후 서로를 평가해 신뢰할 수 있는 동승 문화를 만들어요.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <section>
+    <h2>서비스 정보</h2>
+    <div class="card">
+      <p><strong>앱 이름:</strong> WeTee</p><br/>
+      <p><strong>플랫폼:</strong> Android / iOS (React Native)</p><br/>
+      <p><strong>대상:</strong> 대학생</p><br/>
+      <p><strong>개발자:</strong> joong159</p><br/>
+      <p><strong>문의:</strong> <a href="mailto:et135951@gmail.com">et135951@gmail.com</a></p>
+    </div>
+  </section>
+
+  <footer>
+    <p>&copy; 2025 WeTee. All rights reserved.</p>
+    <p style="margin-top:6px;">
+      <a href="mailto:et135951@gmail.com">문의하기</a>
+    </p>
+  </footer>
+</body>
+</html>
