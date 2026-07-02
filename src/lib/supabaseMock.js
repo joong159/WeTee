@@ -17,36 +17,56 @@ const MOCK_PROFILES = [
   { id: 'user-3', email: 'test3@daejin.ac.kr', student_id: '20229876', gender: '남', university: '대진대학교' },
 ];
 
+const MOCK_DATA_VERSION = 3;
+
 export async function initMockData() {
-  const existing = await AsyncStorage.getItem('mock_profiles');
-  if (!existing) {
-    await setItem('mock_profiles', MOCK_PROFILES);
-    await setItem('mock_rooms', [
-      {
-        id: 'room-1', created_by: 'user-1',
-        departure: '대진대역 1번출구', destination: '대진대 정문',
-        departure_time: new Date(Date.now() + 30 * 60000).toISOString(),
-        capacity: 4, gender_filter: 'anyone', status: 'recruiting',
-        total_fare: 0, bank_account: '국민은행 123-456-789012',
-        kakaopay_url: '', created_at: new Date().toISOString(),
-      },
-      {
-        id: 'room-2', created_by: 'user-2',
-        departure: '포천터미널', destination: '대진대 공학관',
-        departure_time: new Date(Date.now() + 60 * 60000).toISOString(),
-        capacity: 3, gender_filter: 'same_gender', status: 'recruiting',
-        total_fare: 0, bank_account: '신한은행 987-654-321098',
-        kakaopay_url: '', created_at: new Date().toISOString(),
-      },
-    ]);
-    await setItem('mock_applicants', [
-      { id: 'app-1', room_id: 'room-1', user_id: 'user-3', status: 'accepted', created_at: new Date().toISOString() },
-    ]);
-    await setItem('mock_chats', [
-      { id: 'msg-1', room_id: 'room-1', sender_id: 'user-1', content: '안녕하세요! 대진대역 1번출구 다이소 앞에서 만나요.', created_at: new Date(Date.now() - 300000).toISOString() },
-    ]);
-    await setItem('mock_ratings', []);
-  }
+  const version = await AsyncStorage.getItem('mock_data_version');
+  if (version === String(MOCK_DATA_VERSION)) return; // 이미 최신
+
+  // 버전이 다르면 전체 초기화
+  await AsyncStorage.multiRemove(['mock_profiles', 'mock_rooms', 'mock_applicants', 'mock_chats', 'mock_ratings', 'mock_current_session']);
+  await AsyncStorage.setItem('mock_data_version', String(MOCK_DATA_VERSION));
+
+  await setItem('mock_profiles', MOCK_PROFILES);
+  await setItem('mock_rooms', [
+    {
+      id: 'room-1', created_by: 'user-1',
+      departure: '왕십리역 2호선', destination: '강남역',
+      dep_lat: 37.5614, dep_lng: 127.0375,
+      dest_lat: 37.4979, dest_lng: 127.0277,
+      departure_time: new Date(Date.now() + 30 * 60000).toISOString(),
+      capacity: 4, gender_filter: 'anyone', status: 'recruiting',
+      estimated_fare: 12000, total_fare: 0,
+      kakaopay_link: '', created_at: new Date().toISOString(),
+    },
+    {
+      id: 'room-2', created_by: 'user-2',
+      departure: '건대입구역', destination: '강남역',
+      dep_lat: 37.5403, dep_lng: 127.0695,
+      dest_lat: 37.4979, dest_lng: 127.0277,
+      departure_time: new Date(Date.now() + 60 * 60000).toISOString(),
+      capacity: 3, gender_filter: 'same_gender', status: 'recruiting',
+      estimated_fare: 15000, total_fare: 0,
+      kakaopay_link: '', created_at: new Date().toISOString(),
+    },
+    {
+      id: 'room-3', created_by: 'user-3',
+      departure: '성수역', destination: '삼성역',
+      dep_lat: 37.5447, dep_lng: 127.0557,
+      dest_lat: 37.5088, dest_lng: 127.0632,
+      departure_time: new Date(Date.now() + 90 * 60000).toISOString(),
+      capacity: 4, gender_filter: 'anyone', status: 'recruiting',
+      estimated_fare: 10000, total_fare: 0,
+      kakaopay_link: '', created_at: new Date().toISOString(),
+    },
+  ]);
+  await setItem('mock_applicants', [
+    { id: 'app-1', room_id: 'room-1', user_id: 'user-2', status: 'accepted', created_at: new Date().toISOString() },
+  ]);
+  await setItem('mock_chats', [
+    { id: 'msg-1', room_id: 'room-1', sender_id: 'user-1', content: '왕십리역 1번출구 앞에서 만나요!', created_at: new Date(Date.now() - 300000).toISOString() },
+  ]);
+  await setItem('mock_ratings', []);
 }
 
 export const supabaseMock = {

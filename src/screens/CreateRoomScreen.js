@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../lib/api';
 
-const REST_KEY = '12d2315e45f31eea37e639a1979a963b';
+const REST_KEY = '61ab42ac0a57cd172625698b308745e9';
 
 function haversineKm(a, b) {
   const R = 6371;
@@ -123,6 +123,10 @@ export default function CreateRoomScreen({ navigation, route }) {
     const { error } = await api.rooms.create({
       departure,
       destination,
+      dep_lat:  depCoords?.lat  || null,
+      dep_lng:  depCoords?.lng  || null,
+      dest_lat: destCoords?.lat || null,
+      dest_lng: destCoords?.lng || null,
       departure_time: buildDepartureTime(),
       capacity: parseInt(capacity) || 4,
       gender_filter: genderFilter,

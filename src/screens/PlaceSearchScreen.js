@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, ActivityIndicator,
+  StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+let Location = null;
+try { Location = require('expo-location'); } catch (_) {}
 
-const REST_KEY = '12d2315e45f31eea37e639a1979a963b';
+const REST_KEY = '61ab42ac0a57cd172625698b308745e9';
 
 function categoryIcon(cat) {
   if (!cat) return '📍';
@@ -30,12 +32,13 @@ function shortCategory(cat) {
 
 export default function PlaceSearchScreen({ navigation, route }) {
   const { title, onSelect } = route.params;
-  const [query, setQuery]     = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [query, setQuery]       = useState('');
+  const [results, setResults]   = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [locLoading, setLocLoading] = useState(false);
   const [apiError, setApiError] = useState(null);
-  const inputRef  = useRef(null);
-  const debounce  = useRef(null);
+  const inputRef = useRef(null);
+  const debounce = useRef(null);
 
   useEffect(() => {
     const t = setTimeout(() => inputRef.current?.focus(), 120);
@@ -60,8 +63,7 @@ export default function PlaceSearchScreen({ navigation, route }) {
       );
       const data = await r.json();
       if (data.errorType || data.code || !r.ok) {
-        const msg = data.message || data.errorType || `HTTP ${r.status}`;
-        setApiError(msg);
+        setApiError(data.message || data.errorType || `HTTP ${r.status}`);
         setResults([]);
       } else {
         setResults(data.documents || []);
@@ -71,6 +73,41 @@ export default function PlaceSearchScreen({ navigation, route }) {
       setResults([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCurrentLocation = async () => {
+    if (!Location) {
+      Alert.alert('알림', '현재 위치 기능을 사용하려면 앱을 재빌드해야 해요.\nnpx expo run:android');
+      return;
+    }
+    setLocLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('위치 권한 필요', '설정에서 위치 권한을 허용해주세요.');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { latitude, longitude } = loc.coords;
+
+      // 좌표 → 주소 변환 (카카오 역지오코딩)
+      const r = await fetch(
+        `https://dapi.kakao.com/v2/local/geo/coord2address.json?x=${longitude}&y=${latitude}`,
+        { headers: { Authorization: 'KakaoAK ' + REST_KEY } }
+      );
+      const data = await r.json();
+      const doc = data.documents?.[0];
+      const name = doc?.road_address?.address_name
+        || doc?.address?.address_name
+        || '현재 위치';
+
+      onSelect({ name, coords: { lat: latitude, lng: longitude } });
+      navigation.goBack();
+    } catch (e) {
+      Alert.alert('오류', '현재 위치를 가져올 수 없어요.');
+    } finally {
+      setLocLoading(false);
     }
   };
 
@@ -101,7 +138,7 @@ export default function PlaceSearchScreen({ navigation, route }) {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      {/* ── 검색 헤더 ── */}
+      {/* 검색 헤더 */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={styles.backArrow}>‹</Text>
@@ -127,7 +164,18 @@ export default function PlaceSearchScreen({ navigation, route }) {
         </View>
       </View>
 
-      {/* ── 결과 ── */}
+      {/* 현재 위치 버튼 */}
+      <TouchableOpacity style={styles.locationBtn} onPress={handleCurrentLocation} disabled={locLoading} activeOpacity={0.75}>
+        {locLoading ? (
+          <ActivityIndicator size="small" color="#2563EB" />
+        ) : (
+          <Text style={styles.locationIcon}>📍</Text>
+        )}
+        <Text style={styles.locationText}>현재 위치 사용</Text>
+      </TouchableOpacity>
+      <View style={styles.locationSep} />
+
+      {/* 결과 */}
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#2563EB" />
@@ -148,9 +196,6 @@ export default function PlaceSearchScreen({ navigation, route }) {
                   <Text style={styles.emptyEmoji}>⚠️</Text>
                   <Text style={styles.emptyTitle}>API 오류</Text>
                   <Text style={[styles.emptySub, { color: '#EF4444', marginBottom: 10, textAlign: 'center', paddingHorizontal: 32 }]}>{apiError}</Text>
-                  <Text style={[styles.emptySub, { textAlign: 'center', paddingHorizontal: 32 }]}>
-                    카카오 개발자 콘솔 → 내 앱 → 제품 설정 → 카카오맵 활성화 필요
-                  </Text>
                 </>
               ) : (
                 <>
@@ -177,10 +222,8 @@ const styles = StyleSheet.create({
   /* 헤더 */
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 10,
-    gap: 10,
+    paddingHorizontal: 16, paddingVertical: 10, gap: 10,
     borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
-    backgroundColor: '#FFFFFF',
   },
   backBtn: { paddingRight: 4 },
   backArrow: { fontSize: 32, color: '#111827', lineHeight: 36, marginTop: -2 },
@@ -196,6 +239,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center',
   },
   clearText: { fontSize: 10, color: '#6B7280', fontWeight: '700' },
+
+  /* 현재 위치 */
+  locationBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 20, paddingVertical: 14,
+  },
+  locationIcon: { fontSize: 20 },
+  locationText: { fontSize: 15, fontWeight: '600', color: '#2563EB' },
+  locationSep: { height: 1, backgroundColor: '#F3F4F6', marginHorizontal: 20 },
 
   /* 결과 아이템 */
   item: {

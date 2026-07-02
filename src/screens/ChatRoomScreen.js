@@ -49,9 +49,9 @@ export default function ChatRoomScreen({ route, navigation }) {
 
   const isHost = room.created_by === currentUser?.id;
   const isParticipant = room.accepted_user_ids?.includes(currentUser?.id) && !isHost;
-  const canChat = isHost || isParticipant;
+  const canChat = !!currentUser && !isHost;
 
-  // 1:1 채팅 상대: 참여자이면 항상 호스트, 호스트이면 선택된 참여자
+  // 1:1 채팅 상대: 비참여자/참여자 모두 호스트, 호스트이면 선택된 참여자
   const partnerId = isHost ? selectedPartnerId : room.created_by;
 
   const loadData = useCallback(async () => {
@@ -118,6 +118,7 @@ export default function ChatRoomScreen({ route, navigation }) {
 
   // 호스트용: 수락된 참여자 목록
   const acceptedApplicants = applicants.filter(a => a.status === 'accepted');
+  const allApplicants = applicants;
 
   const renderMessage = ({ item }) => {
     const isMine = item.sender_id === currentUser?.id;
@@ -153,11 +154,17 @@ export default function ChatRoomScreen({ route, navigation }) {
             <View style={styles.infoDetails}>
               <InfoRow label="상태" value={STATUS_LABELS[room.status] || room.status} />
               <InfoRow label="인원" value={`${room.participant_count}/${room.capacity}명`} />
+              {room.estimated_fare > 0 && (
+                <InfoRow label="예상 총 요금" value={`약 ${room.estimated_fare.toLocaleString()}원`} />
+              )}
               {estimatedPerPerson > 0 && (
-                <InfoRow label="예상 1인 부담" value={`약 ${estimatedPerPerson.toLocaleString()}원`} />
+                <InfoRow label="예상 인당 금액" value={`약 ${estimatedPerPerson.toLocaleString()}원`} />
+              )}
+              {room.total_fare > 0 && (
+                <InfoRow label="실제 총 요금" value={`${room.total_fare.toLocaleString()}원`} />
               )}
               {actualPerPerson > 0 && (
-                <InfoRow label="실제 1인 부담" value={`${actualPerPerson.toLocaleString()}원`} />
+                <InfoRow label="실제 인당 금액" value={`${actualPerPerson.toLocaleString()}원`} />
               )}
               <TouchableOpacity style={styles.kakaoMapBtn} onPress={handleKakaoMap}>
                 <Text style={styles.kakaoMapBtnText}>카카오맵으로 경로 보기</Text>
@@ -179,12 +186,12 @@ export default function ChatRoomScreen({ route, navigation }) {
           <Text style={styles.partnerListTitle}>참여자와 1:1 대화</Text>
         </View>
         <ScrollView style={styles.partnerList}>
-          {acceptedApplicants.length === 0 ? (
+          {allApplicants.length === 0 ? (
             <View style={styles.emptyMsgs}>
-              <Text style={styles.emptyMsgsText}>아직 참여자가 없어요</Text>
+              <Text style={styles.emptyMsgsText}>아직 신청자가 없어요</Text>
             </View>
           ) : (
-            acceptedApplicants.map(app => (
+            allApplicants.map(app => (
               <TouchableOpacity
                 key={app.id}
                 style={styles.partnerItem}
@@ -195,9 +202,18 @@ export default function ChatRoomScreen({ route, navigation }) {
                     {(app.user?.student_id || app.user?.phone || '?').slice(-2)}
                   </Text>
                 </View>
-                <View>
+                <View style={{ flex: 1 }}>
                   <Text style={styles.partnerName}>{app.user?.phone || app.user?.student_id}</Text>
                   <Text style={styles.partnerSub}>{app.user?.gender === '여' ? '여성' : '남성'}</Text>
+                </View>
+                <View style={[styles.statusPill,
+                  app.status === 'accepted' ? styles.statusPillAccepted :
+                  app.status === 'rejected' ? styles.statusPillRejected :
+                  styles.statusPillPending
+                ]}>
+                  <Text style={styles.statusPillText}>
+                    {app.status === 'accepted' ? '수락' : app.status === 'rejected' ? '거절' : '대기'}
+                  </Text>
                 </View>
                 <Text style={styles.partnerArrow}>›</Text>
               </TouchableOpacity>
@@ -228,11 +244,17 @@ export default function ChatRoomScreen({ route, navigation }) {
             <View style={styles.infoDetails}>
               <InfoRow label="상태" value={STATUS_LABELS[room.status] || room.status} />
               <InfoRow label="인원" value={`${room.participant_count}/${room.capacity}명`} />
+              {room.estimated_fare > 0 && (
+                <InfoRow label="예상 총 요금" value={`약 ${room.estimated_fare.toLocaleString()}원`} />
+              )}
               {estimatedPerPerson > 0 && (
-                <InfoRow label="예상 1인 부담" value={`약 ${estimatedPerPerson.toLocaleString()}원`} />
+                <InfoRow label="예상 인당 금액" value={`약 ${estimatedPerPerson.toLocaleString()}원`} />
+              )}
+              {room.total_fare > 0 && (
+                <InfoRow label="실제 총 요금" value={`${room.total_fare.toLocaleString()}원`} />
               )}
               {actualPerPerson > 0 && (
-                <InfoRow label="실제 1인 부담" value={`${actualPerPerson.toLocaleString()}원`} />
+                <InfoRow label="실제 인당 금액" value={`${actualPerPerson.toLocaleString()}원`} />
               )}
               <TouchableOpacity style={styles.kakaoMapBtn} onPress={handleKakaoMap}>
                 <Text style={styles.kakaoMapBtnText}>카카오맵으로 경로 보기</Text>
@@ -266,12 +288,29 @@ export default function ChatRoomScreen({ route, navigation }) {
           }
         />
 
-        {/* 입력창 또는 신청 버튼 */}
-        {canChat ? (
+        {/* 참여 신청 상태 바 (비참여자) */}
+        {!isHost && !isParticipant && (
+          myApplication ? (
+            <View style={styles.pendingBar}>
+              <Text style={styles.pendingText}>
+                {myApplication.status === 'pending' ? '⏳ 호스트 승인 대기중' : '❌ 신청이 거절되었습니다'}
+              </Text>
+            </View>
+          ) : (
+            room.status === 'recruiting' && room.participant_count < room.capacity && (
+              <TouchableOpacity style={styles.applyBtn} onPress={handleApply}>
+                <Text style={styles.applyBtnText}>참여 신청하기</Text>
+              </TouchableOpacity>
+            )
+          )
+        )}
+
+        {/* 채팅 입력창 */}
+        {canChat && (
           <View style={styles.inputBar}>
             <TextInput
               style={styles.chatInput}
-              placeholder="메시지 입력..."
+              placeholder={isParticipant ? '메시지 입력...' : '호스트에게 문의하기...'}
               placeholderTextColor="#9CA3AF"
               value={inputText}
               onChangeText={setInputText}
@@ -283,18 +322,6 @@ export default function ChatRoomScreen({ route, navigation }) {
               <Text style={styles.sendBtnText}>전송</Text>
             </TouchableOpacity>
           </View>
-        ) : myApplication ? (
-          <View style={styles.pendingBar}>
-            <Text style={styles.pendingText}>
-              {myApplication.status === 'pending' ? '호스트 승인 대기중' : '신청이 거절되었습니다'}
-            </Text>
-          </View>
-        ) : (
-          room.status === 'recruiting' && room.participant_count < room.capacity && (
-            <TouchableOpacity style={styles.applyBtn} onPress={handleApply}>
-              <Text style={styles.applyBtnText}>참여 신청하기</Text>
-            </TouchableOpacity>
-          )
         )}
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -344,7 +371,12 @@ const styles = StyleSheet.create({
   partnerAvatarText: { fontSize: 14, fontWeight: '700', color: '#2563EB' },
   partnerName: { fontSize: 14, fontWeight: '600', color: '#111827' },
   partnerSub: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
-  partnerArrow: { marginLeft: 'auto', fontSize: 20, color: '#D1D5DB' },
+  partnerArrow: { fontSize: 20, color: '#D1D5DB' },
+  statusPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginRight: 6 },
+  statusPillPending:  { backgroundColor: '#FEF3C7' },
+  statusPillAccepted: { backgroundColor: '#D1FAE5' },
+  statusPillRejected: { backgroundColor: '#FEE2E2' },
+  statusPillText: { fontSize: 11, fontWeight: '600', color: '#374151' },
   msgList: { padding: 16, gap: 12, paddingBottom: 8 },
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   msgRowMine: { flexDirection: 'row-reverse' },
