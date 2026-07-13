@@ -302,7 +302,7 @@ export default function HomeScreen({ navigation, route }) {
           <RoomCard
             room={item}
             currentUser={currentUser}
-            onPress={() => navigation.navigate('ChatRoom', { room: item, currentUser })}
+            onPress={() => navigation.navigate('ChatRoom', { room: item, currentUser, userDepCoords: depCoords })}
             similarity={item._sim}
           />
         )}

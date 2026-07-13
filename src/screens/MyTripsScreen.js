@@ -124,7 +124,7 @@ export default function MyTripsScreen({ navigation, route }) {
             <TripCard
               item={item}
               currentUser={currentUser}
-              onPress={() => navigation.navigate('ChatRoom', { room: item.room, currentUser })}
+              onPress={() => navigation.navigate('ChatRoom', { room: item.room, currentUser, userDepCoords: null })}
               onLeave={() => handleLeave(item.room?.id)}
             />
           )}

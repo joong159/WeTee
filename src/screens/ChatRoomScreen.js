@@ -11,6 +11,37 @@ const STATUS_LABELS = {
   settlement: '정산중', completed: '완료',
 };
 
+function haversineKm(a, b) {
+  const R = 6371;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const s = Math.sin(dLat / 2) ** 2
+    + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180)
+    * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+// 탑승 좌표 기반 탑승 비율 계산 (0.1 ~ 1.0)
+function calcRideRatio(room, boardingLat, boardingLng) {
+  if (!room.dep_lat || !room.dest_lat || !boardingLat) return 1.0;
+  const dep  = { lat: room.dep_lat,  lng: room.dep_lng  };
+  const dest = { lat: room.dest_lat, lng: room.dest_lng };
+  const boarding = { lat: boardingLat, lng: boardingLng };
+  const total = haversineKm(dep, dest);
+  if (total === 0) return 1.0;
+  const depToBoarding = haversineKm(dep, boarding);
+  return Math.max(0.1, Math.min(1.0, 1 - depToBoarding / total));
+}
+
+// 비율 기반 정산: 각자의 탑승 비율에 따라 분배
+function splitFareByRatio(totalFare, participants) {
+  const totalRatio = participants.reduce((s, p) => s + p.ratio, 0);
+  return participants.map(p => ({
+    ...p,
+    share: totalRatio > 0 ? Math.ceil(totalFare * p.ratio / totalRatio) : Math.ceil(totalFare / participants.length),
+  }));
+}
+
 function formatTime(iso) {
   const d = new Date(iso);
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
@@ -25,33 +56,24 @@ function InfoRow({ label, value }) {
   );
 }
 
-// 중간 합류 금액 계산: 각 사람의 탑승 비율에 따라 금액 분배
-function calcFareShare(totalFare, participants) {
-  if (!participants || participants.length === 0) return 0;
-  const totalRatio = participants.reduce((sum, p) => sum + (p.rideRatio || 1), 0);
-  return participants.map(p => ({
-    ...p,
-    share: Math.ceil(totalFare * (p.rideRatio || 1) / totalRatio),
-  }));
-}
-
 export default function ChatRoomScreen({ route, navigation }) {
-  const { room: initialRoom, currentUser } = route.params;
-  const [room, setRoom] = useState(initialRoom);
-  const [messages, setMessages] = useState([]);
-  const [inputText, setInputText] = useState('');
+  const { room: initialRoom, currentUser, userDepCoords } = route.params;
+  const [room, setRoom]             = useState(initialRoom);
+  const [messages, setMessages]     = useState([]);
+  const [inputText, setInputText]   = useState('');
   const [applicants, setApplicants] = useState([]);
   const [myApplication, setMyApplication] = useState(null);
-  const [infoExpanded, setInfoExpanded] = useState(true);
+  const [infoExpanded, setInfoExpanded]   = useState(true);
   const [selectedPartnerId, setSelectedPartnerId] = useState(null);
+  const [showSettlement, setShowSettlement] = useState(false);
+  const [settleFare, setSettleFare] = useState('');
   const flatListRef = useRef(null);
-  const pollRef = useRef(null);
+  const pollRef    = useRef(null);
 
-  const isHost = room.created_by === currentUser?.id;
+  const isHost       = room.created_by === currentUser?.id;
   const isParticipant = room.accepted_user_ids?.includes(currentUser?.id) && !isHost;
-  const canChat = !!currentUser && !isHost;
-
-  // 1:1 채팅 상대: 비참여자/참여자 모두 호스트, 호스트이면 선택된 참여자
+  // 호스트도 채팅 가능 (파트너 선택 후 채팅창에서)
+  const canChat = !!currentUser;
   const partnerId = isHost ? selectedPartnerId : room.created_by;
 
   const loadData = useCallback(async () => {
@@ -70,17 +92,22 @@ export default function ChatRoomScreen({ route, navigation }) {
     return () => clearInterval(pollRef.current);
   }, [loadData]);
 
-  // 1:1 메시지 필터: 나 ↔ 상대방 메시지만 표시
   const filteredMessages = partnerId
     ? messages.filter(m =>
         (m.sender_id === currentUser?.id && m.recipient_id === partnerId) ||
-        (m.sender_id === partnerId && m.recipient_id === currentUser?.id)
+        (m.sender_id === partnerId        && m.recipient_id === currentUser?.id)
       )
     : [];
 
+  const handleApplicantAction = async (applicantId, status) => {
+    const { error } = await api.applicants.updateStatus(applicantId, status);
+    if (error) return Alert.alert('오류', error.message);
+    loadData();
+  };
+
   const handleApply = async () => {
     if (!currentUser) return Alert.alert('오류', '로그인이 필요합니다.');
-    const { error } = await api.applicants.apply(room.id, currentUser.id);
+    const { error } = await api.applicants.apply(room.id, currentUser.id, userDepCoords || null);
     if (error) return Alert.alert('오류', error.message);
     Alert.alert('신청 완료', '호스트 승인을 기다려주세요.');
     loadData();
@@ -90,8 +117,8 @@ export default function ChatRoomScreen({ route, navigation }) {
     const content = inputText.trim();
     if (!content || !canChat || !partnerId) return;
     setInputText('');
-    const { error } = await api.chat.send(room.id, currentUser?.id || '', content, partnerId);
-    if (!error) loadData();
+    await api.chat.send(room.id, currentUser?.id || '', content, partnerId);
+    loadData();
   };
 
   const handleKakaoMap = () => {
@@ -103,12 +130,21 @@ export default function ChatRoomScreen({ route, navigation }) {
     });
   };
 
-  const handleKakaoPay = () => {
+  const handleKakaoPay = (amount) => {
     const link = room.kakaopay_link || '';
     if (!link) return Alert.alert('카카오페이 링크 없음', '호스트가 카카오페이 링크를 등록하지 않았어요.');
-    Linking.openURL(link).catch(() => {
-      Alert.alert('오류', '카카오페이 앱을 열 수 없습니다.\n카카오페이 앱이 설치되어 있는지 확인해주세요.');
-    });
+    Linking.openURL(link).catch(() =>
+      Alert.alert('오류', '카카오페이 앱을 열 수 없습니다.')
+    );
+  };
+
+  const handleSettleConfirm = async () => {
+    const fare = parseInt(settleFare.replace(/[^0-9]/g, '')) || 0;
+    if (!fare) return Alert.alert('오류', '실제 요금을 입력해주세요.');
+    await api.rooms.updateFare(room.id, fare, 'settlement');
+    Alert.alert('정산 시작', '참여자들에게 카카오페이로 송금 요청을 보내세요.');
+    setShowSettlement(false);
+    setRoom(r => ({ ...r, total_fare: fare, status: 'settlement' }));
   };
 
   const estimatedPerPerson = room.estimated_fare && room.capacity
@@ -116,9 +152,22 @@ export default function ChatRoomScreen({ route, navigation }) {
   const actualPerPerson = room.participant_count > 0 && room.total_fare > 0
     ? Math.ceil(room.total_fare / room.participant_count) : 0;
 
-  // 호스트용: 수락된 참여자 목록
   const acceptedApplicants = applicants.filter(a => a.status === 'accepted');
-  const allApplicants = applicants;
+  const allApplicants      = applicants;
+
+  // 정산 참여자 목록 (호스트 + 수락된 신청자)
+  const settleParticipants = [
+    { userId: room.created_by, name: '호스트 (나)', ratio: 1.0, boarding_lat: null },
+    ...acceptedApplicants.map(a => ({
+      userId: a.user_id,
+      name: a.user?.phone || a.user?.student_id || '참여자',
+      boarding_lat: a.boarding_lat,
+      boarding_lng: a.boarding_lng,
+      ratio: calcRideRatio(room, a.boarding_lat, a.boarding_lng),
+    })),
+  ];
+  const settleFareNum = parseInt(settleFare.replace(/[^0-9]/g, '')) || room.total_fare || 0;
+  const splitResult = splitFareByRatio(settleFareNum, settleParticipants);
 
   const renderMessage = ({ item }) => {
     const isMine = item.sender_id === currentUser?.id;
@@ -140,50 +189,127 @@ export default function ChatRoomScreen({ route, navigation }) {
     );
   };
 
-  // 호스트가 참여자를 아직 선택하지 않은 경우: 참여자 목록 표시
+  // 방 정보 카드 (공통)
+  const InfoCard = () => (
+    <TouchableOpacity style={styles.infoCard} onPress={() => setInfoExpanded(v => !v)} activeOpacity={0.8}>
+      <View style={styles.infoCardHeader}>
+        <Text style={styles.infoRoute}>{room.departure} → {room.destination}</Text>
+        <Text style={styles.infoToggle}>{infoExpanded ? '▲' : '▼'}</Text>
+      </View>
+      {infoExpanded && (
+        <View style={styles.infoDetails}>
+          <InfoRow label="상태"   value={STATUS_LABELS[room.status] || room.status} />
+          <InfoRow label="인원"   value={`${room.participant_count}/${room.capacity}명`} />
+          {room.estimated_fare > 0 && (
+            <InfoRow label="예상 총 요금"  value={`약 ${room.estimated_fare.toLocaleString()}원`} />
+          )}
+          {estimatedPerPerson > 0 && (
+            <InfoRow label="예상 인당 금액" value={`약 ${estimatedPerPerson.toLocaleString()}원`} />
+          )}
+          {room.total_fare > 0 && (
+            <InfoRow label="실제 총 요금"  value={`${room.total_fare.toLocaleString()}원`} />
+          )}
+          {actualPerPerson > 0 && (
+            <InfoRow label="실제 인당 금액" value={`${actualPerPerson.toLocaleString()}원`} />
+          )}
+          <TouchableOpacity style={styles.kakaoMapBtn} onPress={handleKakaoMap}>
+            <Text style={styles.kakaoMapBtnText}>카카오맵으로 경로 보기</Text>
+          </TouchableOpacity>
+          {room.kakaopay_link ? (
+            <TouchableOpacity style={styles.kakaoPayBtn} onPress={() => handleKakaoPay(actualPerPerson || estimatedPerPerson)}>
+              <Text style={styles.kakaoPayBtnText}>
+                카카오페이로 정산
+                {(actualPerPerson || estimatedPerPerson) > 0
+                  ? `  ${(actualPerPerson || estimatedPerPerson).toLocaleString()}원` : ''}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+
+  // ── 정산 패널 (호스트) ──────────────────────────────────
+  if (isHost && showSettlement) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
+        <InfoCard />
+        <View style={styles.settleHeader}>
+          <TouchableOpacity onPress={() => setShowSettlement(false)}>
+            <Text style={styles.backBarText}>← 뒤로</Text>
+          </TouchableOpacity>
+          <Text style={styles.settleTitle}>중간 합류 정산</Text>
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.settleScroll}>
+          {/* 실제 요금 입력 */}
+          <Text style={styles.settleSection}>실제 택시 요금</Text>
+          <View style={styles.settleInputRow}>
+            <TextInput
+              style={styles.settleInput}
+              placeholder="실제 요금 입력 (원)"
+              placeholderTextColor="#9CA3AF"
+              keyboardType="number-pad"
+              value={settleFare}
+              onChangeText={setSettleFare}
+            />
+          </View>
+
+          {/* 참여자별 금액 */}
+          <Text style={styles.settleSection}>참여자별 부담 금액</Text>
+          <View style={styles.settleCard}>
+            {splitResult.map((p, i) => {
+              const ratioPercent = Math.round(p.ratio * 100);
+              const hasBoardingPoint = p.boarding_lat && p.boarding_lat !== room.dep_lat;
+              return (
+                <View key={p.userId} style={[styles.settleRow, i > 0 && styles.settleRowBorder]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.settlePersonName}>{p.name}</Text>
+                    {hasBoardingPoint ? (
+                      <Text style={styles.settleBoardingTag}>📍 중간 탑승 · {ratioPercent}% 구간</Text>
+                    ) : (
+                      <Text style={styles.settleFullTag}>전 구간 탑승</Text>
+                    )}
+                  </View>
+                  <Text style={styles.settleAmount}>
+                    {settleFareNum > 0 ? p.share.toLocaleString() + '원' : '-'}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
+          {settleFareNum > 0 && (
+            <Text style={styles.settleSumNote}>
+              * 탑승 구간 비율에 따라 계산됩니다 (합계 오차 가능)
+            </Text>
+          )}
+
+          <TouchableOpacity style={styles.settleConfirmBtn} onPress={handleSettleConfirm}>
+            <Text style={styles.settleConfirmText}>정산 시작하기</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ── 호스트: 참여자 목록 ────────────────────────────────
   if (isHost && !selectedPartnerId) {
     return (
       <SafeAreaView style={styles.container} edges={['bottom']}>
-        {/* 방 정보 */}
-        <TouchableOpacity style={styles.infoCard} onPress={() => setInfoExpanded(v => !v)} activeOpacity={0.8}>
-          <View style={styles.infoCardHeader}>
-            <Text style={styles.infoRoute}>{room.departure} → {room.destination}</Text>
-            <Text style={styles.infoToggle}>{infoExpanded ? '▲' : '▼'}</Text>
-          </View>
-          {infoExpanded && (
-            <View style={styles.infoDetails}>
-              <InfoRow label="상태" value={STATUS_LABELS[room.status] || room.status} />
-              <InfoRow label="인원" value={`${room.participant_count}/${room.capacity}명`} />
-              {room.estimated_fare > 0 && (
-                <InfoRow label="예상 총 요금" value={`약 ${room.estimated_fare.toLocaleString()}원`} />
-              )}
-              {estimatedPerPerson > 0 && (
-                <InfoRow label="예상 인당 금액" value={`약 ${estimatedPerPerson.toLocaleString()}원`} />
-              )}
-              {room.total_fare > 0 && (
-                <InfoRow label="실제 총 요금" value={`${room.total_fare.toLocaleString()}원`} />
-              )}
-              {actualPerPerson > 0 && (
-                <InfoRow label="실제 인당 금액" value={`${actualPerPerson.toLocaleString()}원`} />
-              )}
-              <TouchableOpacity style={styles.kakaoMapBtn} onPress={handleKakaoMap}>
-                <Text style={styles.kakaoMapBtnText}>카카오맵으로 경로 보기</Text>
-              </TouchableOpacity>
-              {room.kakaopay_link ? (
-                <TouchableOpacity style={styles.kakaoPayBtn} onPress={handleKakaoPay}>
-                  <Text style={styles.kakaoPayBtnText}>
-                    카카오페이로 정산
-                    {estimatedPerPerson > 0 ? '  ' + estimatedPerPerson.toLocaleString() + '원' : ''}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          )}
-        </TouchableOpacity>
-
-        {/* 참여자 선택 */}
+        <InfoCard />
         <View style={styles.partnerListHeader}>
-          <Text style={styles.partnerListTitle}>참여자와 1:1 대화</Text>
+          <Text style={styles.partnerListTitle}>참여자 목록</Text>
+          <View style={styles.headerBtns}>
+            <TouchableOpacity style={styles.settleStartBtn} onPress={() => setShowSettlement(true)}>
+              <Text style={styles.settleStartText}>정산</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.settleStartBtn, { backgroundColor: '#F3F4F6', marginLeft: 6 }]}
+              onPress={() => navigation.navigate('ManageRoom', { room, currentUser })}
+            >
+              <Text style={[styles.settleStartText, { color: '#374151' }]}>방 관리</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <ScrollView style={styles.partnerList}>
           {allApplicants.length === 0 ? (
@@ -191,89 +317,75 @@ export default function ChatRoomScreen({ route, navigation }) {
               <Text style={styles.emptyMsgsText}>아직 신청자가 없어요</Text>
             </View>
           ) : (
-            allApplicants.map(app => (
-              <TouchableOpacity
-                key={app.id}
-                style={styles.partnerItem}
-                onPress={() => setSelectedPartnerId(app.user_id)}
-              >
-                <View style={styles.partnerAvatar}>
-                  <Text style={styles.partnerAvatarText}>
-                    {(app.user?.student_id || app.user?.phone || '?').slice(-2)}
-                  </Text>
+            allApplicants.map(app => {
+              const ratio = calcRideRatio(room, app.boarding_lat, app.boarding_lng);
+              const hasMidJoin = app.boarding_lat && ratio < 0.99;
+              const isPending = app.status === 'pending';
+              return (
+                <View key={app.id} style={styles.partnerItem}>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 }}
+                    onPress={() => setSelectedPartnerId(app.user_id)}
+                  >
+                    <View style={styles.partnerAvatar}>
+                      <Text style={styles.partnerAvatarText}>
+                        {(app.user?.student_id || app.user?.phone || '?').slice(-2)}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.partnerName}>{app.user?.phone || app.user?.student_id}</Text>
+                      <Text style={styles.partnerSub}>
+                        {hasMidJoin
+                          ? `📍 중간 탑승 (${Math.round(ratio * 100)}% 구간)`
+                          : app.user?.gender === '여' ? '여성' : '남성'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  {isPending ? (
+                    <View style={styles.actionBtns}>
+                      <TouchableOpacity
+                        style={styles.acceptBtn}
+                        onPress={() => handleApplicantAction(app.id, 'accepted')}
+                      >
+                        <Text style={styles.acceptBtnText}>수락</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.rejectBtn}
+                        onPress={() => handleApplicantAction(app.id, 'rejected')}
+                      >
+                        <Text style={styles.rejectBtnText}>거절</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={[styles.statusPill,
+                      app.status === 'accepted' ? styles.statusPillAccepted : styles.statusPillRejected
+                    ]}>
+                      <Text style={styles.statusPillText}>
+                        {app.status === 'accepted' ? '수락' : '거절'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.partnerName}>{app.user?.phone || app.user?.student_id}</Text>
-                  <Text style={styles.partnerSub}>{app.user?.gender === '여' ? '여성' : '남성'}</Text>
-                </View>
-                <View style={[styles.statusPill,
-                  app.status === 'accepted' ? styles.statusPillAccepted :
-                  app.status === 'rejected' ? styles.statusPillRejected :
-                  styles.statusPillPending
-                ]}>
-                  <Text style={styles.statusPillText}>
-                    {app.status === 'accepted' ? '수락' : app.status === 'rejected' ? '거절' : '대기'}
-                  </Text>
-                </View>
-                <Text style={styles.partnerArrow}>›</Text>
-              </TouchableOpacity>
-            ))
+              );
+            })
           )}
         </ScrollView>
       </SafeAreaView>
     );
   }
 
+  // ── 채팅 화면 (호스트 파트너 선택 후 / 일반 참여자) ───
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
-        {/* 뒤로가기 (호스트용) */}
         {isHost && (
           <TouchableOpacity style={styles.backBar} onPress={() => setSelectedPartnerId(null)}>
             <Text style={styles.backBarText}>← 참여자 목록으로</Text>
           </TouchableOpacity>
         )}
 
-        {/* 방 정보 카드 */}
-        <TouchableOpacity style={styles.infoCard} onPress={() => setInfoExpanded(v => !v)} activeOpacity={0.8}>
-          <View style={styles.infoCardHeader}>
-            <Text style={styles.infoRoute}>{room.departure} → {room.destination}</Text>
-            <Text style={styles.infoToggle}>{infoExpanded ? '▲' : '▼'}</Text>
-          </View>
-          {infoExpanded && (
-            <View style={styles.infoDetails}>
-              <InfoRow label="상태" value={STATUS_LABELS[room.status] || room.status} />
-              <InfoRow label="인원" value={`${room.participant_count}/${room.capacity}명`} />
-              {room.estimated_fare > 0 && (
-                <InfoRow label="예상 총 요금" value={`약 ${room.estimated_fare.toLocaleString()}원`} />
-              )}
-              {estimatedPerPerson > 0 && (
-                <InfoRow label="예상 인당 금액" value={`약 ${estimatedPerPerson.toLocaleString()}원`} />
-              )}
-              {room.total_fare > 0 && (
-                <InfoRow label="실제 총 요금" value={`${room.total_fare.toLocaleString()}원`} />
-              )}
-              {actualPerPerson > 0 && (
-                <InfoRow label="실제 인당 금액" value={`${actualPerPerson.toLocaleString()}원`} />
-              )}
-              <TouchableOpacity style={styles.kakaoMapBtn} onPress={handleKakaoMap}>
-                <Text style={styles.kakaoMapBtnText}>카카오맵으로 경로 보기</Text>
-              </TouchableOpacity>
-              {room.kakaopay_link ? (
-                <TouchableOpacity style={styles.kakaoPayBtn} onPress={handleKakaoPay}>
-                  <Text style={styles.kakaoPayBtnText}>
-                    카카오페이로 정산
-                    {(actualPerPerson > 0 || estimatedPerPerson > 0)
-                      ? '  ' + (actualPerPerson || estimatedPerPerson).toLocaleString() + '원'
-                      : ''}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          )}
-        </TouchableOpacity>
+        <InfoCard />
 
-        {/* 메시지 */}
         <FlatList
           ref={flatListRef}
           data={filteredMessages}
@@ -288,7 +400,7 @@ export default function ChatRoomScreen({ route, navigation }) {
           }
         />
 
-        {/* 참여 신청 상태 바 (비참여자) */}
+        {/* 비참여자 신청 버튼 / 대기 상태 */}
         {!isHost && !isParticipant && (
           myApplication ? (
             <View style={styles.pendingBar}>
@@ -299,14 +411,16 @@ export default function ChatRoomScreen({ route, navigation }) {
           ) : (
             room.status === 'recruiting' && room.participant_count < room.capacity && (
               <TouchableOpacity style={styles.applyBtn} onPress={handleApply}>
-                <Text style={styles.applyBtnText}>참여 신청하기</Text>
+                <Text style={styles.applyBtnText}>
+                  참여 신청하기{userDepCoords ? ' (중간 탑승)' : ''}
+                </Text>
               </TouchableOpacity>
             )
           )
         )}
 
-        {/* 채팅 입력창 */}
-        {canChat && (
+        {/* 채팅 입력 */}
+        {canChat && partnerId && (
           <View style={styles.inputBar}>
             <TextInput
               style={styles.chatInput}
@@ -335,6 +449,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#EAEAEA',
   },
   backBarText: { fontSize: 14, color: '#2563EB', fontWeight: '500' },
+
   infoCard: { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#EAEAEA', padding: 14 },
   infoCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   infoRoute: { fontSize: 14, fontWeight: '700', color: '#111827', flex: 1 },
@@ -353,17 +468,30 @@ const styles = StyleSheet.create({
     paddingVertical: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center',
   },
   kakaoPayBtnText: { color: '#3C1E1E', fontSize: 14, fontWeight: '700' },
+
+  /* 참여자 목록 */
   partnerListHeader: {
     backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: '#EAEAEA',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
   partnerListTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  headerBtns: { flexDirection: 'row', alignItems: 'center' },
+  settleStartBtn: {
+    backgroundColor: '#EFF6FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+  },
+  settleStartText: { fontSize: 13, color: '#2563EB', fontWeight: '600' },
   partnerList: { flex: 1 },
   partnerItem: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: '#F4F5F7',
   },
+  actionBtns: { flexDirection: 'row', gap: 6 },
+  acceptBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#D1FAE5', borderRadius: 8 },
+  acceptBtnText: { color: '#059669', fontSize: 13, fontWeight: '600' },
+  rejectBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#FEE2E2', borderRadius: 8 },
+  rejectBtnText: { color: '#EF4444', fontSize: 13, fontWeight: '600' },
   partnerAvatar: {
     width: 44, height: 44, borderRadius: 22, backgroundColor: '#EFF6FF',
     alignItems: 'center', justifyContent: 'center',
@@ -377,6 +505,39 @@ const styles = StyleSheet.create({
   statusPillAccepted: { backgroundColor: '#D1FAE5' },
   statusPillRejected: { backgroundColor: '#FEE2E2' },
   statusPillText: { fontSize: 11, fontWeight: '600', color: '#374151' },
+
+  /* 정산 패널 */
+  settleHeader: {
+    backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: '#EAEAEA',
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+  },
+  settleTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  settleScroll: { padding: 16, gap: 12, paddingBottom: 40 },
+  settleSection: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6, marginTop: 8 },
+  settleInputRow: { marginBottom: 8 },
+  settleInput: {
+    height: 48, backgroundColor: '#FFFFFF', borderRadius: 12, paddingHorizontal: 14,
+    color: '#111827', fontSize: 15, borderWidth: 1, borderColor: '#E5E7EB',
+  },
+  settleCard: {
+    backgroundColor: '#FFFFFF', borderRadius: 14,
+    borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden',
+  },
+  settleRow: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 8 },
+  settleRowBorder: { borderTopWidth: 1, borderTopColor: '#F4F5F7' },
+  settlePersonName: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  settleFullTag:     { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
+  settleBoardingTag: { fontSize: 11, color: '#7C3AED', fontWeight: '600', marginTop: 2 },
+  settleAmount: { fontSize: 16, fontWeight: '800', color: '#2563EB', minWidth: 70, textAlign: 'right' },
+  settleSumNote: { fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginTop: 4 },
+  settleConfirmBtn: {
+    height: 52, backgroundColor: '#2563EB', borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center', marginTop: 16,
+  },
+  settleConfirmText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+
+  /* 채팅 */
   msgList: { padding: 16, gap: 12, paddingBottom: 8 },
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   msgRowMine: { flexDirection: 'row-reverse' },
@@ -387,8 +548,8 @@ const styles = StyleSheet.create({
   },
   avatarText: { fontSize: 11, fontWeight: '600', color: '#374151' },
   senderName: { fontSize: 11, color: '#9CA3AF', marginBottom: 3, marginLeft: 2 },
-  bubble: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, maxWidth: '100%' },
-  bubbleMine: { backgroundColor: '#2563EB', borderBottomRightRadius: 4 },
+  bubble: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16 },
+  bubbleMine:  { backgroundColor: '#2563EB', borderBottomRightRadius: 4 },
   bubbleOther: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4 },
   bubbleText: { fontSize: 14, color: '#111827', lineHeight: 20 },
   bubbleTextMine: { color: '#FFFFFF' },

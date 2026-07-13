@@ -151,10 +151,16 @@ export const supabaseMock = {
         return { ...a, user };
       });
     },
-    applyForRoom: async (roomId, userId) => {
+    applyForRoom: async (roomId, userId, boardingCoords = null) => {
       const applicants = await getItem('mock_applicants', []);
       if (applicants.some(a => a.room_id === roomId && a.user_id === userId)) return { error: { message: '이미 신청한 방입니다.' } };
-      const newApp = { id: 'app-' + Math.random().toString(36).substr(2, 9), room_id: roomId, user_id: userId, status: 'pending', created_at: new Date().toISOString() };
+      const newApp = {
+        id: 'app-' + Math.random().toString(36).substr(2, 9),
+        room_id: roomId, user_id: userId, status: 'pending',
+        boarding_lat: boardingCoords?.lat || null,
+        boarding_lng: boardingCoords?.lng || null,
+        created_at: new Date().toISOString(),
+      };
       applicants.push(newApp);
       await setItem('mock_applicants', applicants);
       return { data: newApp, error: null };

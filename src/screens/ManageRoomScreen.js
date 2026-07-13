@@ -1,10 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, FlatList, StyleSheet,
+  View, Text, TouchableOpacity, StyleSheet,
   Alert, TextInput, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../lib/api';
+
+function haversineKm(a, b) {
+  const R = 6371;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const s = Math.sin(dLat / 2) ** 2
+    + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180)
+    * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+function calcRideRatio(room, boardingLat, boardingLng) {
+  if (!room.dep_lat || !room.dest_lat || !boardingLat) return 1.0;
+  const dep  = { lat: room.dep_lat,  lng: room.dep_lng  };
+  const dest = { lat: room.dest_lat, lng: room.dest_lng };
+  const boarding = { lat: boardingLat, lng: boardingLng };
+  const total = haversineKm(dep, dest);
+  if (total === 0) return 1.0;
+  return Math.max(0.1, Math.min(1.0, 1 - haversineKm(dep, boarding) / total));
+}
 
 export default function ManageRoomScreen({ route, navigation }) {
   const { room: initialRoom, currentUser } = route.params;
@@ -85,19 +105,40 @@ export default function ManageRoomScreen({ route, navigation }) {
             <Text style={styles.sectionTitle}>정산 처리</Text>
             <TextInput
               style={styles.input}
-              placeholder="총 요금 입력 (원)"
+              placeholder="실제 총 요금 입력 (원)"
               placeholderTextColor="#9CA3AF"
               value={fareInput}
               onChangeText={setFareInput}
               keyboardType="number-pad"
             />
-            {fareInput ? (
-              <Text style={styles.perPersonText}>
-                1인 부담: {Math.ceil(parseInt(fareInput) / (room.participant_count || 1)).toLocaleString()}원
-              </Text>
-            ) : null}
+            {fareInput && (() => {
+              const total = parseInt(fareInput) || 0;
+              const participants = [
+                { label: '호스트 (나)', ratio: 1.0 },
+                ...acceptedApplicants.map(a => ({
+                  label: a.user?.phone || a.user?.student_id || '참여자',
+                  ratio: calcRideRatio(room, a.boarding_lat, a.boarding_lng),
+                  isMid: a.boarding_lat && calcRideRatio(room, a.boarding_lat, a.boarding_lng) < 0.99,
+                })),
+              ];
+              const totalRatio = participants.reduce((s, p) => s + p.ratio, 0);
+              return (
+                <View style={styles.splitPreview}>
+                  {participants.map((p, i) => (
+                    <View key={i} style={styles.splitRow}>
+                      <Text style={styles.splitName}>
+                        {p.label}{p.isMid ? ' 📍' : ''}
+                      </Text>
+                      <Text style={styles.splitAmount}>
+                        {Math.ceil(total * p.ratio / totalRatio).toLocaleString()}원
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              );
+            })()}
             <TouchableOpacity style={styles.settlementBtn} onPress={handleSettlement}>
-              <Text style={styles.settlementBtnText}>정산 공지</Text>
+              <Text style={styles.settlementBtnText}>정산 시작</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -168,6 +209,12 @@ const styles = StyleSheet.create({
     color: '#111827', fontSize: 15, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 8,
   },
   perPersonText: { fontSize: 13, color: '#6B7280', marginBottom: 12, textAlign: 'right' },
+  splitPreview: {
+    backgroundColor: '#F9FAFB', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8,
+  },
+  splitRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  splitName: { fontSize: 13, color: '#374151', fontWeight: '500' },
+  splitAmount: { fontSize: 14, color: '#2563EB', fontWeight: '700' },
   settlementBtn: {
     height: 44, backgroundColor: '#8B5CF6', borderRadius: 10, alignItems: 'center', justifyContent: 'center',
   },

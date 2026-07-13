@@ -18,7 +18,7 @@ export const api = {
   },
   applicants: {
     getByRoom: (roomId) => supabaseMock.db.getApplicants(roomId),
-    apply: (roomId, userId) => supabaseMock.db.applyForRoom(roomId, userId),
+    apply: (roomId, userId, boardingCoords) => supabaseMock.db.applyForRoom(roomId, userId, boardingCoords),
     updateStatus: (applicantId, status) => supabaseMock.db.updateApplicantStatus(applicantId, status),
     getMyApplications: (userId) => supabaseMock.db.getMyApplications(userId),
     leave: (roomId, userId) => supabaseMock.db.leaveRoom(roomId, userId),
